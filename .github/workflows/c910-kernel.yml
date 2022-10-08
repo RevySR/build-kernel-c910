@@ -13,6 +13,8 @@ jobs:
       xuetie_toolchain: https://occ-oss-prod.oss-cn-hangzhou.aliyuncs.com/resource/1836682/1640771208032
       toolchain_file_name: Xuantie-900-gcc-linux-5.10.4-glibc-x86_64-V2.2.4-20211227.tar.gz
       kernel_branch: devel-5.10
+      img_branch: uos_test
+      img_module: https://gitee.com/thead-yocto/gpu_bxm_4_64-kernel.git
       toolchain_tripe: riscv64-unknown-linux-gnu-
     steps:
       - name: Checkout
@@ -22,8 +24,8 @@ jobs:
         run: |
               sudo apt update && \
               sudo apt install -y gdisk dosfstools g++-12-riscv64-linux-gnu build-essential \
-                                  libncurses-dev gawk flex bison openssl libssl-dev \
-                                  dkms libelf-dev libudev-dev libpci-dev libiberty-dev autoconf
+                                  libncurses-dev gawk flex bison openssl libssl-dev tree \
+                                  dkms libelf-dev libudev-dev libpci-dev libiberty-dev autoconf device-tree-compiler
               sudo update-alternatives --install \
                   /usr/bin/riscv64-linux-gnu-gcc riscv64-gcc /usr/bin/riscv64-linux-gnu-gcc-12 10
               sudo update-alternatives --install \
@@ -41,6 +43,7 @@ jobs:
               pushd kernel
                 make CROSS_COMPILE=${toolchain_tripe} ARCH=riscv light_defconfig
                 make CROSS_COMPILE=${toolchain_tripe} ARCH=riscv -j$(nproc)
+                make CROSS_COMPILE=${toolchain_tripe} ARCH=riscv -j$(nproc) dtbs
                 if [ x"$(cat .config | grep CONFIG_MODULES=y)" = x"CONFIG_MODULES=y" ]; then
                   sudo make CROSS_COMPILE=${toolchain_tripe} ARCH=riscv INSTALL_MOD_PATH=../rootfs/ modules_install -j$(nproc)
                 fi
@@ -51,7 +54,24 @@ jobs:
                 sudo cp -v arch/riscv/boot/Image.gz ../rootfs/boot/
 
                 # Install DTB
-                # sudo cp -v arch/riscv/boot/dts/*.dtb ../rootfs/boot/
+                sudo cp -v arch/riscv/boot/dts/thead/*.dtb ../rootfs/boot/
+
+                git clone -b ${img_branch} ${img_module} img_module
+                pushd img_module
+                  export KERNELDIR=$PWD/../
+                  make
+                  cp -vr output ../../rootfs/
+                  for kernel_version in $(ls ../../rootfs/lib/modules/);
+                  do
+                    sudo install -D -p -m 644 output/lib/modules/${kernel_version}/extra/drm_nulldisp.ko \
+                      "../../rootfs/lib/modules/${kernel_version}/extra/drm_nulldisp.ko"
+                    sudo install -D -p -m 644 output/lib/modules/${kernel_version}/extra/pvrsrvkm.ko \
+                      "../../rootfs/lib/modules/${kernel_version}/extra/pvrsrvkm.ko"
+                    sudo depmod -a -b "../../rootfs" "${kernel_version}"
+                  done
+                  # cp -vr output/lib/firmware ../../rootfs/
+                popd
+                tree ../rootfs
               popd
         
       - name: compress

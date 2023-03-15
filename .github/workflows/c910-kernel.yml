@@ -16,11 +16,11 @@ jobs:
       kernel_git: https://gitee.com/thead-yocto/kernel.git
       img_branch: uos_test
       img_module: https://gitee.com/thead-yocto/gpu_bxm_4_64-kernel.git
+      uboot_branch: master
+      uboot_git: https://gitee.com/thead-yocto/u-boot.git
       toolchain_tripe: riscv64-unknown-linux-gnu-
+      ARCH: riscv
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-
       - name: Install software
         run: |
               sudo apt update && \
@@ -42,13 +42,13 @@ jobs:
 
               git clone -b ${kernel_branch} --depth=1 ${kernel_git} kernel
               pushd kernel
-                make CROSS_COMPILE=${toolchain_tripe} ARCH=riscv light_defconfig
-                make CROSS_COMPILE=${toolchain_tripe} ARCH=riscv -j$(nproc)
-                make CROSS_COMPILE=${toolchain_tripe} ARCH=riscv -j$(nproc) dtbs
+                make CROSS_COMPILE=${toolchain_tripe} ARCH=${ARCH} light_defconfig
+                make CROSS_COMPILE=${toolchain_tripe} ARCH=${ARCH} -j$(nproc)
+                make CROSS_COMPILE=${toolchain_tripe} ARCH=${ARCH} -j$(nproc) dtbs
                 if [ x"$(cat .config | grep CONFIG_MODULES=y)" = x"CONFIG_MODULES=y" ]; then
-                  sudo make CROSS_COMPILE=${toolchain_tripe} ARCH=riscv INSTALL_MOD_PATH=../rootfs/ modules_install -j$(nproc)
+                  sudo make CROSS_COMPILE=${toolchain_tripe} ARCH=${ARCH} INSTALL_MOD_PATH=../rootfs/ modules_install -j$(nproc)
                 fi
-                sudo make CROSS_COMPILE=${toolchain_tripe} ARCH=riscv INSTALL_PATH=../rootfs/boot zinstall -j$(nproc)
+                sudo make CROSS_COMPILE=${toolchain_tripe} ARCH=${ARCH} INSTALL_PATH=../rootfs/boot zinstall -j$(nproc)
 
                 # Install Kernel
                 sudo cp -v arch/riscv/boot/Image ../rootfs/boot/
@@ -74,7 +74,23 @@ jobs:
                 popd
                 tree ../rootfs
               popd
-        
+
+      - name: uboot compile
+        run: |
+              export PATH="/opt/Xuantie-900-gcc-linux-5.10.4-glibc-x86_64-V2.6.1/bin:$PATH"
+
+              git clone -b ${uboot_branch} --depth=1 ${uboot_git} uboot
+              pushd uboot
+                sed -i "s/YYLTYPE yylloc;/extern YYLTYPE yylloc;/" scripts/dtc/dtc-lexer.l
+                make ARCH=${ARCH} CROSS_COMPILE=${toolchain_tripe} light_lpi4a_defconfig
+                make ARCH=${ARCH} CROSS_COMPILE=${toolchain_tripe} -j$(nproc)
+                find . -name "u-boot-with-spl.bin" | xargs -I{} cp -av {} ../rootfs/u-boot-with-spl-lpi4a.bin
+                make ARCH=${ARCH} CROSS_COMPILE=${toolchain_tripe} clean
+                make ARCH=${ARCH} CROSS_COMPILE=${toolchain_tripe} light_a_val_defconfig
+                make ARCH=${ARCH} CROSS_COMPILE=${toolchain_tripe} -j$(nproc)
+                find . -name "u-boot-with-spl.bin" | xargs -I{} cp -av {} ../rootfs/u-boot-with-spl-vala.bin
+              popd
+              
       - name: compress
         run: tar -zcvf kernel.tar.gz rootfs
 
